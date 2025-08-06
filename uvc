@@ -1,0 +1,491 @@
+#!/bin/bash
+
+# uvc - A conda-like wrapper for uv
+# Uses ~/.local/share/uvc for environment storage
+
+UVC_HOME="${UVC_HOME:-"$HOME/.local/share/uvc"}"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+SCRIPT_NAME="$(basename "$SCRIPT_SOURCE")"
+
+echoerr() { echo "$@" 1>&2; }
+
+# Print usage information
+usage() {
+    echoerr "Usage: $SCRIPT_NAME {create|remove|activate|install|uninstall|list|envs} [options]"
+    echoerr ""
+    echoerr "Commands:"
+    echoerr "  create <name> [-p/--python <python-version>]  Create a new environment"
+    echoerr "  remove <name> [--yes/-y]                     Remove an environment"
+    echoerr "  activate <name>                              Activate an environment"
+    echoerr "  run <name> <executable> <args> ...           Run an executable within an environment"
+    echoerr "  python <name> <python-args> ...              Run a python script or module within an environment"
+    echoerr "  install <package-name> ...                   Install a package in current environment"
+    echoerr "  uninstall <package-name> ...                 Uninstall a package from current environment"
+    echoerr "  list                                         List packages in current environment"
+    echoerr "  envs                                         List all available environments"
+    echoerr ""
+    echoerr "Examples:"
+    echoerr "  $SCRIPT_NAME create myenv"
+    echoerr "  $SCRIPT_NAME create myenv -p 3.11"
+    echoerr "  $SCRIPT_NAME remove myenv"
+    echoerr "  $SCRIPT_NAME remove myenv --yes"
+    echoerr "  $SCRIPT_NAME activate myenv"
+    echoerr "  $SCRIPT_NAME run myenv python --version"
+    echoerr "  $SCRIPT_NAME python myenv --version"
+    echoerr "  $SCRIPT_NAME install requests"
+    echoerr "  $SCRIPT_NAME uninstall requests"
+    echoerr "  $SCRIPT_NAME list"
+    echoerr "  $SCRIPT_NAME envs"
+}
+
+
+
+# Assert a first argument is provided
+assert_arg() {
+    local arg_name="$1"
+    shift
+    if [[ $# -eq 0 || -z "$1" ]]; then
+        echoerr "Error: $arg_name is required."
+        usage
+        exit 1
+    fi
+}
+
+# Check if we're in an activated environment
+check_activated_env() {
+    if [[ -z "$VIRTUAL_ENV" ]] || [[ ! -d "$VIRTUAL_ENV" ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Assert that we're in an activated environment
+assert_activated_env() {
+    if ! check_activated_env; then
+        echoerr "Error: You must be in an activated environment to $1."
+        echoerr "Activate an environment first using: uvc activate <environment-name>"
+        exit 1
+    fi
+}
+
+# Create a new environment
+create_env() {
+    local env_name=""
+    local python_version=""
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -p|--python)
+                python_version="$2"
+                shift 2
+                ;;
+            *)
+                env_name="$1"
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$env_name" ]]; then
+        echoerr "Error: Environment name is required."
+        usage
+        exit 1
+    fi
+
+    validate_environment_name "$env_name"
+
+    # Ensure UVC_HOME directory exists
+    mkdir -p "$UVC_HOME"
+
+    local env_path="$UVC_HOME/$env_name"
+
+    if [[ -d "$env_path" ]]; then
+        echoerr "Environment '$env_name' already exists."
+        exit 1
+    fi
+
+    echoerr "Creating environment '$env_name'..."
+    
+    # Determine Python version to use
+    if [[ -n "$python_version" ]]; then
+        if ! uv venv --python "$python_version" "$env_path"; then
+            echoerr "Error: Failed to create environment '$env_name' with Python $python_version."
+            exit 1
+        fi
+    else
+        if ! uv venv "$env_path"; then
+            echoerr "Error: Failed to create environment '$env_name'."
+            exit 1
+        fi
+    fi
+    
+    echoerr "Environment '$env_name' created successfully in $env_path"
+}
+
+# Remove an environment
+remove_env() {
+    local env_name=""
+    local force=false
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --yes|-y)
+                force=true
+                shift
+                ;;
+            *)
+                env_name="$1"
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$env_name" ]]; then
+        echoerr "Error: Environment name is required."
+        usage
+        exit 1
+    fi
+
+    validate_environment_name "$env_name"
+
+    local env_path="$UVC_HOME/$env_name"
+
+    if [[ ! -d "$env_path" ]]; then
+        echoerr "Error: Environment '$env_name' does not exist."
+        exit 1
+    fi
+
+    if [[ "$force" == false ]]; then
+        echo -n "Are you sure you want to remove environment '$env_name'? [y/N]: "
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            echoerr "Operation cancelled."
+            exit 1
+        fi
+    fi
+
+    echoerr "Removing environment '$env_name'..."
+    
+    # Handle partial removal gracefully
+    if ! rm -rf "$env_path"; then
+        echoerr "Warning: Failed to completely remove environment directory"
+        exit 1
+    fi
+
+    # Check if there are any remaining environments
+    if [[ ! -n "$(ls -A "$UVC_HOME")" ]]; then
+        echoerr "Last environment removed. Removing empty UVC_HOME directory."
+        rmdir "$UVC_HOME" 2>/dev/null || true
+    fi
+    
+    echoerr "Environment '$env_name' removed successfully."
+}
+
+run_exec() {
+    assert_arg "Environment name" "$@"
+
+    local env_name="$1"
+    shift
+
+    validate_environment_name "$env_name"
+
+    local env_path="$UVC_HOME/$env_name"
+
+    if [[ ! -d "$env_path" ]]; then
+        echoerr "Error: Environment '$env_name' does not exist."
+        exit 1
+    fi
+
+    PATH="$env_path:$PATH" "$@"
+}
+
+validate_environment_name() {
+    local env_name="$1"
+    if [[ ! "$env_name" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
+        echoerr "Error: Invalid environment name '$env_name'. Must start with letter and contain only alphanumeric, dash, or underscore."
+        exit 1
+    fi
+}
+
+# Activate an environment
+activate_env() {
+    local env_name=""
+
+    assert_arg "Environment name" "$@"
+
+    env_name="$1"
+
+    validate_environment_name "$env_name"
+
+    local env_path="$UVC_HOME/$env_name"
+
+    if [[ ! -d "$env_path" ]]; then
+        echoerr "Error: Environment '$env_name' does not exist."
+        exit 1
+    fi
+
+    # Check if the environment has activation script
+    if [[ -f "$env_path/bin/activate" ]]; then
+        echo "source '$env_path/bin/activate'"
+    elif [[ -f "$env_path/Scripts/activate" ]]; then
+        # Windows-style activation
+        echo "source '$env_path/Scripts/activate'"
+    else
+        echoerr "Error: Could not find activation script for environment '$env_name'"
+        echoerr "Environment location: $env_path"
+        exit 1
+    fi
+}
+
+# Install or uninstall a package
+modify_package() {
+    local subcommand="$1"
+    shift
+
+    echoerr "${subcommand}ing package(s) in environment '$(basename "$VIRTUAL_ENV")'..."
+    
+    if uv pip "$subcommand" "$@"; then
+        echoerr "Package(s) ${subcommand}ed successfully."
+    else
+        echoerr "Error: Failed to $subcommand package(s)."
+        exit 1
+    fi
+}
+
+# Install a package in the current environment
+install_package() {
+    assert_arg "Package name" "$@"
+    
+    assert_activated_env "install packages"
+    
+    modify_package "install" "$@"
+}
+
+# Uninstall a package from the current environment
+uninstall_package() {
+    assert_arg "Package name" "$@"
+
+    local package_name="$1"
+    
+    assert_activated_env "uninstall packages"
+    
+    modify_package "uninstall" "$@"
+}
+
+# List packages in the current environment
+list_packages() {
+    assert_activated_env "list packages"
+    
+    echoerr "Packages in environment '$(basename "$VIRTUAL_ENV")':"
+    uv pip list
+}
+
+# List available environments
+list_environments() {
+    if [[ ! -d "$UVC_HOME" ]]; then
+        echo "No environments found."
+        exit 0
+    fi
+    
+    echo "Available environments:"
+    for env_dir in "$UVC_HOME"/*/; do
+        if [[ -d "$env_dir" ]]; then
+            env_name=$(basename "$env_dir")
+            echo "  - $env_name"
+        fi
+    done
+}
+
+__shell_completion_bash() {
+    cat <<'EOF'
+
+_uvc_complete() {
+    local cur prev subcmds
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    subcmds="create remove activate run python install uninstall list envs"
+
+    if [[ $COMP_CWORD -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
+    elif [[ $COMP_CWORD -eq 2 ]]; then
+        case $prev in
+            a|activate|r|run|p|python)
+                COMPREPLY=( $(compgen -W "$(ls -1 "${UVC_HOME:-"$HOME/.local/share/uvc"}" 2>/dev/null)" -- "$cur") )
+                ;;
+        esac
+    fi
+}
+
+complete -F _uvc_complete uvc
+EOF
+}
+__shell_completion_zsh() {
+    cat <<'EOF'
+
+_uvc_complete() {
+  local -a subcmds
+  subcmds=(
+    'create:Create a new environment'
+    'remove:Remove an environment'
+    'activate:Activate an environment'
+    'run:Run an executable within an environment'
+    'python:Run a python script or module within an environment'
+    'install:Install a package in current environment'
+    'uninstall:Uninstall a package from current environment'
+    'list:List packages in current environment'
+    'envs:List all available environments'
+  )
+  case $CURRENT in
+    2)
+      _describe 'subcommand' subcmds
+      ;;
+    3)
+        case $words[2] in
+            a|activate|r|run|p|python)
+                local files
+                files=(${(f)"$(ls -1 "${UVC_HOME:-"$HOME/.local/share/uvc"}" 2>/dev/null)"})
+                compadd -- $files
+                ;;
+        esac
+      ;;
+  esac
+}
+
+compdef _uvc_complete uvc
+EOF
+}
+
+assert_shell() {
+    assert_arg "Shell name" "$@"
+
+    local shell="$1"
+        
+    if [[ "$shell" != "bash" && "$shell" != "zsh" ]]; then
+        echoerr "Error: Unknown shell, please select either zsh or bash"
+        exit 1
+    fi
+}
+shell() {
+    assert_shell "$@"
+    local shell="$1"
+
+    cat <<EOF
+__uvc_exe() {
+    "$SCRIPT_SOURCE" "\$@"
+}
+
+__uvc_activate() {
+    local env_name="\$2"
+    local source_path="\$(__uvc_exe "\$@")"
+    if [ -z "\$source_path" ]; then
+        return 1
+    elif ! eval "\$source_path"; then
+        echo "Error: Failed to activate \$env_name"
+        return 1
+    fi
+}
+
+uvc() {
+    case "\$1" in
+        activate)
+            __uvc_activate "\$@"
+            ;;
+        *)
+            __uvc_exe "\$@"
+            ;;
+    esac
+}
+EOF
+
+if [[ "$shell" == "zsh" ]]; then
+    __shell_completion_zsh
+else
+    __shell_completion_bash
+fi
+
+}
+
+shellenv() {
+    assert_shell "$@"
+    local shell="$1"
+    echo 'eval "$('"$SCRIPT_SOURCE"' shell '"$shell"')"'
+}
+
+# Add at script start
+if ! command -v uv &> /dev/null; then
+    echoerr "Error: uv is not installed or not in PATH"
+    echoerr "Please install uv: https://github.com/astral-sh/uv"
+    exit 1
+fi
+
+# Verify version
+UV_VERSION=$(uv --version 2>/dev/null | cut -d' ' -f2)
+if [[ -z "$UV_VERSION" ]] || [[ $(printf '%s\n' "0.1.0" "$UV_VERSION" | sort -V | head -n1) != "0.1.0" ]]; then
+    echoerr "Warning: uv version may not be compatible. Minimum required: 0.1.0"
+fi
+
+# Main execution logic
+if [[ $# -eq 0 ]]; then
+    usage
+    exit 1
+fi
+
+
+case "$1" in
+    c|create)
+        shift
+        create_env "$@"
+        ;;
+    r|remove)
+        shift
+        remove_env "$@"
+        ;;
+    a|activate)
+        shift
+        activate_env "$@"
+        ;;
+    r|run)
+        shift
+        run_exec "$@"
+        ;;
+    p|python)
+        shift
+        env_name="$1"
+        shift
+        run_exec "$env_name" "python" "$@"
+        ;;
+    i|install)
+        shift
+        install_package "$@"
+        ;;
+    u|uninstall)
+        shift
+        uninstall_package "$@"
+        ;;
+    l|ls|list)
+        shift
+        list_packages "$@"
+        ;;
+    e|env|envs)
+        shift
+        list_environments "$@"
+        ;;
+    s|shell)
+        shift
+        shell "$@"
+        ;;
+    shellenv)
+        shift
+        shellenv "$@"
+        ;;
+    -h|--help|h|help)
+        usage
+        ;;
+    *)
+        echoerr "Unknown command: $1"
+        usage
+        exit 1
+        ;;
+esac
