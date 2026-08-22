@@ -12,7 +12,7 @@ echoerr() { echo "$@" 1>&2; }
 
 # Print usage information
 usage() {
-    echoerr "Usage: $SCRIPT_NAME {create|remove|activate|install|uninstall|list|envs} [options]"
+    echoerr "Usage: $SCRIPT_NAME {create|remove|activate|install|install-wheel|uninstall|list|envs} [options]"
     echoerr ""
     echoerr "Commands:"
     echoerr "  create <name> [-p/--python <python-version>]  Create a new environment"
@@ -21,6 +21,7 @@ usage() {
     echoerr "  run <name> <executable> <args> ...           Run an executable within an environment"
     echoerr "  python <name> <python-args> ...              Run a python script or module within an environment"
     echoerr "  install <package-name> ...                   Install a package in current environment"
+    echoerr "  install-wheel <repo> <fileloc> ...           Install a .whl file that lives inside a git repo"
     echoerr "  uninstall <package-name> ...                 Uninstall a package from current environment"
     echoerr "  list                                         List packages in current environment"
     echoerr "  envs                                         List all available environments"
@@ -34,6 +35,8 @@ usage() {
     echoerr "  $SCRIPT_NAME run myenv python --version"
     echoerr "  $SCRIPT_NAME python myenv --version"
     echoerr "  $SCRIPT_NAME install requests"
+    echoerr "  $SCRIPT_NAME install-wheel org/repo wheels/pkg.whl"
+    echoerr "  $SCRIPT_NAME install-wheel git@github.com:org/repo.git wheels/pkg.whl"
     echoerr "  $SCRIPT_NAME uninstall requests"
     echoerr "  $SCRIPT_NAME list"
     echoerr "  $SCRIPT_NAME envs"
@@ -106,7 +109,7 @@ create_env() {
     fi
 
     echoerr "Creating environment '$env_name'..."
-    
+
     # Determine Python version to use
     if [[ -n "$python_version" ]]; then
         if ! uv venv --python "$python_version" "$env_path"; then
@@ -119,7 +122,7 @@ create_env() {
             exit 1
         fi
     fi
-    
+
     echoerr "Environment '$env_name' created successfully in $env_path"
 }
 
@@ -166,7 +169,7 @@ remove_env() {
     fi
 
     echoerr "Removing environment '$env_name'..."
-    
+
     # Handle partial removal gracefully
     if ! rm -rf "$env_path"; then
         echoerr "Warning: Failed to completely remove environment directory"
@@ -178,7 +181,7 @@ remove_env() {
         echoerr "Last environment removed. Removing empty UVC_HOME directory."
         rmdir "$UVC_HOME" 2>/dev/null || true
     fi
-    
+
     echoerr "Environment '$env_name' removed successfully."
 }
 
@@ -244,7 +247,7 @@ modify_package() {
     shift
 
     echoerr "${subcommand}ing package(s) in environment '$(basename "$VIRTUAL_ENV")'..."
-    
+
     if uv pip "$subcommand" "$@"; then
         echoerr "Package(s) ${subcommand}ed successfully."
     else
@@ -256,10 +259,63 @@ modify_package() {
 # Install a package in the current environment
 install_package() {
     assert_arg "Package name" "$@"
-    
+
     assert_activated_env "install packages"
-    
+
     modify_package "install" "$@"
+}
+
+# Resolve a `repo` argument to a git remote URL.
+resolve_repo_url() {
+    local repo="$1"
+    if [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+        echo "git@github.com:${repo}.git"
+    else
+        echo "$repo"
+    fi
+}
+
+# Install a .whl file that lives inside a git repo.
+install_wheel() {
+    assert_arg "Repo" "$@"
+    local repo="$1"
+    shift
+    assert_arg "Wheel file location" "$@"
+    local fileloc="$1"
+    shift
+
+    assert_activated_env "install a wheel"
+
+    local repo_url
+    repo_url="$(resolve_repo_url "$repo")"
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d)" || {
+        echoerr "Error: failed to create a temp directory."
+        exit 1
+    }
+    trap "rm -rf '$tmp_dir'" EXIT
+
+    echoerr "Fetching '$fileloc' from '$repo_url'..."
+    if ! git archive --remote="$repo_url" HEAD "$fileloc" 2>/dev/null | tar -x -C "$tmp_dir"; then
+        echoerr "Error: failed to fetch '$fileloc' from '$repo_url'."
+        echoerr "The repo must support 'git archive --remote' (GitHub does, for repos you have access to)."
+        exit 1
+    fi
+
+    local wheel_path="$tmp_dir/$fileloc"
+    if [[ ! -f "$wheel_path" ]]; then
+        echoerr "Error: '$fileloc' was not found in '$repo_url'."
+        exit 1
+    fi
+
+    echoerr "Installing '$fileloc' in environment '$(basename "$VIRTUAL_ENV")'..."
+    if uv pip install "$wheel_path" "$@"; then
+        echoerr "Package(s) installed successfully."
+    else
+        echoerr "Error: Failed to install '$wheel_path'."
+        exit 1
+    fi
 }
 
 # Uninstall a package from the current environment
@@ -267,16 +323,16 @@ uninstall_package() {
     assert_arg "Package name" "$@"
 
     local package_name="$1"
-    
+
     assert_activated_env "uninstall packages"
-    
+
     modify_package "uninstall" "$@"
 }
 
 # List packages in the current environment
 list_packages() {
     assert_activated_env "list packages"
-    
+
     echoerr "Packages in environment '$(basename "$VIRTUAL_ENV")':"
     uv pip list
 }
@@ -287,7 +343,7 @@ list_environments() {
         echo "No environments found."
         exit 0
     fi
-    
+
     echo "Available environments:"
     for env_dir in "$UVC_HOME"/*/; do
         if [[ -d "$env_dir" ]]; then
@@ -305,7 +361,7 @@ _uvc_complete() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    subcmds="create remove activate run python install uninstall list envs"
+    subcmds="create remove activate run python install install-wheel uninstall list envs"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
@@ -333,6 +389,7 @@ _uvc_complete() {
     'run:Run an executable within an environment'
     'python:Run a python script or module within an environment'
     'install:Install a package in current environment'
+    'install-wheel:Install a .whl file that lives inside a git repo'
     'uninstall:Uninstall a package from current environment'
     'list:List packages in current environment'
     'envs:List all available environments'
@@ -361,7 +418,7 @@ assert_shell() {
     assert_arg "Shell name" "$@"
 
     local shell="$1"
-        
+
     if [[ "$shell" != "bash" && "$shell" != "zsh" ]]; then
         echoerr "Error: Unknown shell, please select either zsh or bash"
         exit 1
@@ -459,6 +516,10 @@ case "$1" in
     i|install)
         shift
         install_package "$@"
+        ;;
+    install-wheel)
+        shift
+        install_wheel "$@"
         ;;
     u|uninstall)
         shift

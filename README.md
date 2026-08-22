@@ -65,6 +65,10 @@ uvc install ipykernel
 # Uninstall a package from the currently activated environment
 uvc uninstall ipykernel
 
+# Install a .whl file that lives inside a git repo without cloning it.
+uvc install-wheel org/repo wheels/pkg-1.0.0-py3-none-any.whl
+uvc install-wheel git@github.com:org/repo.git wheels/pkg-1.0.0-py3-none-any.whl
+
 # Run python within an environment (does not need to be activated)
 uvc python myenv --version
 
