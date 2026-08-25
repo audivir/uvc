@@ -1,6 +1,6 @@
 # uvc - Conda-like Wrapper for uv
 
-A lightweight wrapper for the `uv` Python package manager that mirrors conda's CLI commands for managing Python virtual environments.
+A lightweight wrapper for the `uv` Python package manager that mirrors the CLI commands of conda for managing Python virtual environments.
 
 ## Overview
 
@@ -148,7 +148,7 @@ uvc envs
 # Activate environment (using eval method)
 eval "$(uvc activate development)"
 
-# Or, if you've set up shellenv (using direct method)
+# Or, if you have set up shellenv (using direct method)
 uvc activate development
 
 # The activation is temporary and affects the current shell session
@@ -184,4 +184,4 @@ Contributions are welcome! Please submit a pull request or open an issue for fea
 ## Acknowledgments
 
 - Built on top of the [`uv`](https://github.com/astral-sh/uv) Python package manager
-- Inspired by the familiarity of conda's interface
+- Inspired by the familiarity of the conda interface

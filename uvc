@@ -1,16 +1,15 @@
 #!/bin/bash
 
 # uvc - A conda-like wrapper for uv
-# Uses ~/.local/share/uvc for environment storage
+# Uses ~/.local/share/uvc for environment storage.
 
 UVC_HOME="${UVC_HOME:-"$HOME/.local/share/uvc"}"
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 SCRIPT_NAME="$(basename "$SCRIPT_SOURCE")"
 
 echoerr() { echo "$@" 1>&2; }
 
-# Print usage information
+# Prints usage information.
 usage() {
     echoerr "Usage: $SCRIPT_NAME {create|remove|activate|install|install-wheel|uninstall|list|envs} [options]"
     echoerr ""
@@ -18,7 +17,7 @@ usage() {
     echoerr "  create <name> [-p/--python <python-version>]  Create a new environment"
     echoerr "  remove <name> [--yes/-y]                     Remove an environment"
     echoerr "  activate <name>                              Activate an environment"
-    echoerr "  run <name> <executable> <args> ...           Run an executable within an environment"
+    echoerr "  run|exec <name> <executable> <args> ...      Run an executable within an environment"
     echoerr "  python <name> <python-args> ...              Run a python script or module within an environment"
     echoerr "  install <package-name> ...                   Install a package in current environment"
     echoerr "  install-wheel <repo> <fileloc> ...           Install a .whl file that lives inside a git repo"
@@ -44,7 +43,7 @@ usage() {
 
 
 
-# Assert a first argument is provided
+# Asserts a first argument is provided.
 assert_arg() {
     local arg_name="$1"
     shift
@@ -55,7 +54,7 @@ assert_arg() {
     fi
 }
 
-# Check if we're in an activated environment
+# Checks whether the current environment is activated.
 check_activated_env() {
     if [[ -z "$VIRTUAL_ENV" ]] || [[ ! -d "$VIRTUAL_ENV" ]]; then
         return 1
@@ -63,7 +62,7 @@ check_activated_env() {
     return 0
 }
 
-# Assert that we're in an activated environment
+# Asserts that the current environment is activated.
 assert_activated_env() {
     if ! check_activated_env; then
         echoerr "Error: You must be in an activated environment to $1."
@@ -72,7 +71,7 @@ assert_activated_env() {
     fi
 }
 
-# Create a new environment
+# Creates a new environment.
 create_env() {
     local env_name=""
     local python_version=""
@@ -98,7 +97,7 @@ create_env() {
 
     validate_environment_name "$env_name"
 
-    # Ensure UVC_HOME directory exists
+    # ensure UVC_HOME directory exists.
     mkdir -p "$UVC_HOME"
 
     local env_path="$UVC_HOME/$env_name"
@@ -110,7 +109,7 @@ create_env() {
 
     echoerr "Creating environment '$env_name'..."
 
-    # Determine Python version to use
+    # determine Python version to use.
     if [[ -n "$python_version" ]]; then
         if ! uv venv --python "$python_version" "$env_path"; then
             echoerr "Error: Failed to create environment '$env_name' with Python $python_version."
@@ -126,7 +125,7 @@ create_env() {
     echoerr "Environment '$env_name' created successfully in $env_path"
 }
 
-# Remove an environment
+# Removes an environment.
 remove_env() {
     local env_name=""
     local force=false
@@ -170,13 +169,13 @@ remove_env() {
 
     echoerr "Removing environment '$env_name'..."
 
-    # Handle partial removal gracefully
+    # handle partial removal gracefully.
     if ! rm -rf "$env_path"; then
         echoerr "Warning: Failed to completely remove environment directory"
         exit 1
     fi
 
-    # Check if there are any remaining environments
+    # check if there are any remaining environments.
     if [[ ! -n "$(ls -A "$UVC_HOME")" ]]; then
         echoerr "Last environment removed. Removing empty UVC_HOME directory."
         rmdir "$UVC_HOME" 2>/dev/null || true
@@ -211,7 +210,7 @@ validate_environment_name() {
     fi
 }
 
-# Activate an environment
+# Activates an environment.
 activate_env() {
     local env_name=""
 
@@ -228,7 +227,7 @@ activate_env() {
         exit 1
     fi
 
-    # Check if the environment has activation script
+    # check if the environment has an activation script.
     if [[ -f "$env_path/bin/activate" ]]; then
         echo "source '$env_path/bin/activate'"
     elif [[ -f "$env_path/Scripts/activate" ]]; then
@@ -241,7 +240,7 @@ activate_env() {
     fi
 }
 
-# Install or uninstall a package
+# Installs or uninstalls a package.
 modify_package() {
     local subcommand="$1"
     shift
@@ -256,7 +255,7 @@ modify_package() {
     fi
 }
 
-# Install a package in the current environment
+# Installs a package in the current environment.
 install_package() {
     assert_arg "Package name" "$@"
 
@@ -275,7 +274,7 @@ resolve_repo_url() {
     fi
 }
 
-# Install a .whl file that lives inside a git repo.
+# Installs a .whl file that lives inside a git repo.
 install_wheel() {
     assert_arg "Repo" "$@"
     local repo="$1"
@@ -294,6 +293,7 @@ install_wheel() {
         echoerr "Error: failed to create a temp directory."
         exit 1
     }
+    # shellcheck disable=SC2064
     trap "rm -rf '$tmp_dir'" EXIT
 
     echoerr "Fetching '$fileloc' from '$repo_url'..."
@@ -318,18 +318,16 @@ install_wheel() {
     fi
 }
 
-# Uninstall a package from the current environment
+# Uninstalls a package from the current environment.
 uninstall_package() {
     assert_arg "Package name" "$@"
-
-    local package_name="$1"
 
     assert_activated_env "uninstall packages"
 
     modify_package "uninstall" "$@"
 }
 
-# List packages in the current environment
+# Lists packages in the current environment.
 list_packages() {
     assert_activated_env "list packages"
 
@@ -337,7 +335,7 @@ list_packages() {
     uv pip list
 }
 
-# List available environments
+# Lists available environments.
 list_environments() {
     if [[ ! -d "$UVC_HOME" ]]; then
         echo "No environments found."
@@ -361,13 +359,13 @@ _uvc_complete() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    subcmds="create remove activate run python install install-wheel uninstall list envs"
+    subcmds="create remove activate run exec python install install-wheel uninstall list envs"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
     elif [[ $COMP_CWORD -eq 2 ]]; then
         case $prev in
-            a|activate|r|run|p|python)
+            a|activate|x|exec|run|p|python)
                 COMPREPLY=( $(compgen -W "$(ls -1 "${UVC_HOME:-"$HOME/.local/share/uvc"}" 2>/dev/null)" -- "$cur") )
                 ;;
         esac
@@ -387,6 +385,7 @@ _uvc_complete() {
     'remove:Remove an environment'
     'activate:Activate an environment'
     'run:Run an executable within an environment'
+    'exec:Run an executable within an environment'
     'python:Run a python script or module within an environment'
     'install:Install a package in current environment'
     'install-wheel:Install a .whl file that lives inside a git repo'
@@ -400,7 +399,7 @@ _uvc_complete() {
       ;;
     3)
         case $words[2] in
-            a|activate|r|run|p|python)
+            a|activate|x|exec|run|p|python)
                 local files
                 files=(${(f)"$(ls -1 "${UVC_HOME:-"$HOME/.local/share/uvc"}" 2>/dev/null)"})
                 compadd -- $files
@@ -467,23 +466,24 @@ fi
 shellenv() {
     assert_shell "$@"
     local shell="$1"
+    # shellcheck disable=SC2016
     echo 'eval "$('"$SCRIPT_SOURCE"' shell '"$shell"')"'
 }
 
-# Add at script start
+# add uv availability check at script start.
 if ! command -v uv &> /dev/null; then
     echoerr "Error: uv is not installed or not in PATH"
     echoerr "Please install uv: https://github.com/astral-sh/uv"
     exit 1
 fi
 
-# Verify version
+# verify version.
 UV_VERSION=$(uv --version 2>/dev/null | cut -d' ' -f2)
 if [[ -z "$UV_VERSION" ]] || [[ $(printf '%s\n' "0.1.0" "$UV_VERSION" | sort -V | head -n1) != "0.1.0" ]]; then
     echoerr "Warning: uv version may not be compatible. Minimum required: 0.1.0"
 fi
 
-# Main execution logic
+# main execution logic
 if [[ $# -eq 0 ]]; then
     usage
     exit 1
@@ -503,7 +503,7 @@ case "$1" in
         shift
         activate_env "$@"
         ;;
-    r|run)
+    x|exec|run)
         shift
         run_exec "$@"
         ;;
@@ -517,7 +517,7 @@ case "$1" in
         shift
         install_package "$@"
         ;;
-    install-wheel)
+    w|install-wheel)
         shift
         install_wheel "$@"
         ;;
