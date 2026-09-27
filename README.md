@@ -18,7 +18,7 @@ A lightweight wrapper for the `uv` Python package manager that mirrors the CLI c
 ### Prerequisites
 
 - `uv` must be installed on your system
-- POSIX `sh` to run `uvc`, and Bash or Zsh for `activate` and completions (Linux/macOS/WSL)
+- POSIX `sh` to run `uvc`, and Bash, Zsh, or Fish for `activate` and completions (Linux/macOS/WSL)
 
 ### Install uvc
 
@@ -104,6 +104,7 @@ This approach temporarily activates the environment in the current shell session
 # Add to your shell configuration file (~/.bashrc, ~/.zshrc, etc.)
 uvc shellenv bash >> ~/.bashrc
 uvc shellenv zsh >> ~/.zshrc
+uvc shellenv fish >> ~/.config/fish/config.fish
 
 # Then reload your shell configuration
 source ~/.bashrc

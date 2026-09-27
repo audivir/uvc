@@ -238,7 +238,9 @@ activate_env() {
     fi
 
     # check if the environment has an activation script.
-    if [ -f "$env_path/bin/activate" ]; then
+    if [ "${UVC_SHELL:-}" = "fish" ] && [ -f "$env_path/bin/activate.fish" ]; then
+        echo "source '$env_path/bin/activate.fish'"
+    elif [ -f "$env_path/bin/activate" ]; then
         echo "source '$env_path/bin/activate'"
     elif [ -f "$env_path/Scripts/activate" ]; then
         # Windows-style activation
@@ -380,6 +382,25 @@ _uvc_complete() {
 complete -F _uvc_complete uvc
 EOF
 }
+__shell_completion_fish() {
+    cat <<'EOF'
+
+complete -c uvc -f
+complete -c uvc -n __fish_use_subcommand -a create -d 'Create a new environment'
+complete -c uvc -n __fish_use_subcommand -a remove -d 'Remove an environment'
+complete -c uvc -n __fish_use_subcommand -a activate -d 'Activate an environment'
+complete -c uvc -n __fish_use_subcommand -a run -d 'Run an executable within an environment'
+complete -c uvc -n __fish_use_subcommand -a exec -d 'Run an executable within an environment'
+complete -c uvc -n __fish_use_subcommand -a python -d 'Run a python script or module within an environment'
+complete -c uvc -n __fish_use_subcommand -a install -d 'Install a package in current environment'
+complete -c uvc -n __fish_use_subcommand -a install-wheel -d 'Install a .whl file that lives inside a git repo'
+complete -c uvc -n __fish_use_subcommand -a uninstall -d 'Uninstall a package from current environment'
+complete -c uvc -n __fish_use_subcommand -a list -d 'List packages in current environment'
+complete -c uvc -n __fish_use_subcommand -a envs -d 'List all available environments'
+complete -c uvc -n '__fish_seen_subcommand_from a activate x exec run p python r remove; and test (count (commandline -opc)) -eq 2' \
+    -a '(command ls -1 (set -q UVC_HOME; and echo $UVC_HOME; or echo $HOME/.local/share/uvc) 2>/dev/null)'
+EOF
+}
 __shell_completion_zsh() {
     cat <<'EOF'
 
@@ -423,14 +444,39 @@ assert_shell() {
 
     shell="$1"
 
-    if [ "$shell" != "bash" ] && [ "$shell" != "zsh" ]; then
-        echoerr "Error: Unknown shell, please select either zsh or bash"
+    if [ "$shell" != "bash" ] && [ "$shell" != "zsh" ] && [ "$shell" != "fish" ]; then
+        echoerr "Error: Unknown shell, please select either zsh, bash, or fish"
         exit 1
     fi
 }
 shell() {
     assert_shell "$@"
     shell="$1"
+
+    if [ "$shell" = "fish" ]; then
+        cat <<EOF
+function __uvc_exe
+    '$SCRIPT_SOURCE' \$argv
+end
+
+function uvc
+    if test "\$argv[1]" = activate
+        set -lx UVC_SHELL fish
+        set -l source_cmd (__uvc_exe \$argv)
+        if test -z "\$source_cmd"
+            return 1
+        else if not eval \$source_cmd
+            echo "Error: Failed to activate \$argv[2]"
+            return 1
+        end
+    else
+        __uvc_exe \$argv
+    end
+end
+EOF
+        __shell_completion_fish
+        return
+    fi
 
     cat <<EOF
 __uvc_exe() {
@@ -471,6 +517,10 @@ fi
 shellenv() {
     assert_shell "$@"
     shell="$1"
+    if [ "$shell" = "fish" ]; then
+        echo "'$SCRIPT_SOURCE' shell fish | source"
+        return
+    fi
     # shellcheck disable=SC2016
     echo 'eval "$('"$SCRIPT_SOURCE"' shell '"$shell"')"'
 }
